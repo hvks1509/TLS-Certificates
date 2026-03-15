@@ -1,1 +1,2 @@
-
+# OpenShift-Specific Certificate Operations
+OpenShift consumes certs in PEM format everywhere. Here's where each type of cert goes.
