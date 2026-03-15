@@ -1,2 +1,127 @@
 # OpenShift-Specific Certificate Operations
 OpenShift consumes certs in PEM format everywhere. Here's where each type of cert goes.
+
+Ingress / Route TLS
+When you create a TLS or re-encrypt route, you supply PEM directly:
+#oc create route edge my-route --service=my-svc --cert=server.crt --key=server.key --ca-cert=ca.crt --hostname=app.example.com
+
+For re-encrypt routes (TLS between router and pod):
+#oc create route reencrypt my-route \
+  --service=my-svc \
+  --cert=server.crt \
+  --key=server.key \
+  --ca-cert=ca.crt \
+  --dest-ca-cert=internal-ca.crt \
+  --hostname=app.example.com
+
+--dest-ca-cert is the CA that signed the backend pod's certificate — the router uses this to verify the pod.
+
+Default Ingress Controller Certificate (cluster-wide)
+To replace the default wildcard cert on *.apps.<cluster>:
+
+# Step 1: Create a secret in openshift-ingress
+oc create secret tls custom-ingress-cert \
+  --cert=fullchain.crt --key=server.key \
+  -n openshift-ingress
+
+# Step 2: Patch the IngressController
+oc patch ingresscontroller default -n openshift-ingress-operator \
+  --type=merge \
+  -p '{"spec":{"defaultCertificate":{"name":"custom-ingress-cert"}}}'
+
+The fullchain.crt should be your server cert concatenated with intermediates:
+cat server.crt intermediate.crt > fullchain.crt
+
+
+API Server Certificate
+To set a custom cert for the API endpoint (api.<cluster>):
+
+# Create the secret in openshift-config
+oc create secret tls api-cert \
+  --cert=fullchain.crt --key=server.key \
+  -n openshift-config
+
+# Patch the APIServer resource
+oc patch apiserver cluster --type=merge \
+  -p '{"spec":{"servingCerts":{"namedCertificates":[{"names":["api.ocp-prod.example.com"],"servingCertificate":{"name":"api-cert"}}]}}}'
+
+Caution: If this cert is wrong or expired, you can lock yourself out of the cluster. Always test the cert chain before applying.
+
+Injecting a Custom CA into the Cluster Trust Bundle
+When your internal CA needs to be trusted cluster-wide (so pods can reach internal services with certs signed by your CA):
+
+# Step 1: Create a ConfigMap with your CA cert
+oc create configmap custom-ca-bundle \
+  --from-file=ca-bundle.crt=ca.crt \
+  -n openshift-config
+
+# Step 2: Patch the cluster proxy to reference it
+oc patch proxy/cluster --type=merge \
+  -p '{"spec":{"trustedCA":{"name":"custom-ca-bundle"}}}'
+
+Once you do this, any ConfigMap in any namespace that carries the label config.openshift.io/inject-trusted-cabundle: "true" will automatically get the merged CA bundle injected:
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trusted-ca
+  labels:
+    config.openshift.io/inject-trusted-cabundle: "true"
+data: {}
+
+The cluster network operator merges your custom CA with the system CAs and populates the ca-bundle.crt key. Pods then mount this ConfigMap and point their TLS clients at it.
+
+TLS Secrets for Application Pods
+Standard Kubernetes TLS secret — works for any app or operator expecting a cert:
+
+#oc create secret tls my-app-tls \
+  --cert=server.crt --key=server.key \
+  -n my-namespace
+
+For apps that need PKCS#12 (Java apps on OpenShift, CockroachDB JDBC connections, etc.), you'd create a generic secret with the P12 file:
+#oc create secret generic my-app-p12 \
+  --from-file=keystore.p12=bundle.p12 \
+  --from-literal=keystore-password=changeit \
+  -n my-namespace
+
+Part 4: Validation & Debugging Commands
+These are invaluable when something isn't working:
+
+# Verify cert matches key (modulus must match)
+openssl x509 -noout -modulus -in server.crt | openssl md5
+openssl rsa -noout -modulus -in server.key | openssl md5
+
+# Verify full chain
+openssl verify -CAfile ca.crt server.crt
+openssl verify -CAfile ca.crt -untrusted intermediate.crt server.crt
+
+# Check what a remote server is presenting
+openssl s_client -connect app.example.com:443 -showcerts </dev/null 2>/dev/null | openssl x509 -text -noout
+
+# Check cert expiry
+openssl x509 -in server.crt -noout -dates
+
+# Check SANs
+openssl x509 -in server.crt -noout -ext subjectAltName
+
+# Decode a PKCS#12 to see what's inside
+openssl pkcs12 -in bundle.p12 -info -nokeys
+
+# Check from inside a pod on OpenShift
+oc exec my-pod -- openssl s_client -connect internal-svc:8443 -CAfile /var/run/secrets/kubernetes.io/serviceaccount/ca.crt </dev/null
+```
+
+---
+
+## Quick Conversion Cheat Sheet
+```
+PEM ←──────→ DER          (encoding flip)
+PEM ───────→ PKCS#12      (bundle key+cert+chain)
+PKCS#12 ───→ PEM          (extract components)
+PKCS#7 ────→ PEM          (extract certs, no keys)
+JKS ←──────→ PKCS#12      (via keytool)
+                ↕
+              PEM          (via openssl)
+
+
+The golden rule for OpenShift: get everything into PEM, concatenate chains top-down (leaf → intermediate → root), and put them in Kubernetes TLS Secrets or ConfigMaps. If a Java app needs PKCS#12, convert from PEM as a build/init step or deliver the P12 via a generic Secret.
