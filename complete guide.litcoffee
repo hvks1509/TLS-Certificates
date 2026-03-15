@@ -71,7 +71,7 @@ Remarks-2: Clients connecting to this server will reject the cert unless you exp
 This is the pattern for organizations that want to issue their own trusted certs across internal infrastructure. Two phases: set up the CA, then use it to sign.
 ## Phase 1: Create the CA
 ## Generate the CA's private key (protect this carefully)
-openssl genrsa -aes256 -out ca.key 4096
+#openssl genrsa -aes256 -out ca.key 4096
 
 # Create the CA's self-signed root certificate
 #openssl req -x509 -new -key ca.key -sha256 -days 3650 -out ca.crt -subj "/C=SG/O=MyCompany/CN=MyCompany Internal CA"
