@@ -17,7 +17,7 @@ Everything starts with a private key. This never leaves your server.
 2. Create a Certificate Signing Request (CSR)
 The CSR bundles your public key with identity information (Subject), and is signed by your private key to prove you hold it.
 
-openssl req -new -key server.key -out server.csr -subj "/C=SG/ST=Singapore/L=Singapore/O=MyCompany/CN=app.example.com"
+#openssl req -new -key server.key -out server.csr -subj "/C=SG/ST=Singapore/L=Singapore/O=MyCompany/CN=app.example.com"
 
 # The fields in the subject (-subj) are:
 Field                       Meaning                       Example
