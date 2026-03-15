@@ -2,17 +2,17 @@
 Everything starts with a private key. This never leaves your server.
 
 # RSA 2048-bit (widely compatible)
-openssl genrsa -out server.key 2048
+#openssl genrsa -out server.key 2048
 
 # RSA 4096-bit (stronger, slightly slower handshake)
-openssl genrsa -out server.key 4096
+#openssl genrsa -out server.key 4096
 
 # ECDSA (modern, faster, smaller) — P-256 curve
-openssl ecparam -genkey -name prime256v1 -noout -out server.key
+#openssl ecparam -genkey -name prime256v1 -noout -out server.key
 
 # You can inspect what you made:
-openssl rsa -in server.key -text -noout        # for RSA
-openssl ec -in server.key -text -noout          # for ECDSA
+#openssl rsa -in server.key -text -noout        # for RSA
+#openssl ec -in server.key -text -noout          # for ECDSA
 
 2. Create a Certificate Signing Request (CSR)
 The CSR bundles your public key with identity information (Subject), and is signed by your private key to prove you hold it.
